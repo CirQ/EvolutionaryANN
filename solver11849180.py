@@ -46,7 +46,7 @@ class ParityNGenerator(object):
     def all(self):
         """ Return all binary vectors within self.bound
 
-        :return: iterable (num, vec) pairs
+        :return: iterable (num, ans, vec) pairs
         :rtype: generator
         """
         for num in range(self.bound):
@@ -157,7 +157,7 @@ class ForwardArtificialNeuralNectwork(object):
         """
         if x.shape != (self.dim_in-1,):
             raise self.ANNException('input dimension not matching')
-        bias = np.ones(1)
+        bias = -np.ones(1)
         tail = np.zeros(self.dim_hid+self.dim_out)
         x = np.concatenate((bias, x, tail), axis=0)
 
