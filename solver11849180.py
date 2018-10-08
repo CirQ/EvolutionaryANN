@@ -4,6 +4,7 @@
 # Created Time: 2018-09-23 18:07:29
 
 import argparse
+import io
 
 import numpy as np
 
@@ -15,7 +16,7 @@ class ParityNGenerator(object):
     class ParityNException(Exception):
         pass
 
-    def __init__(self, N=5):
+    def __init__(self, N):
         """ Constructor
 
         :param N: parameter in Parity-N problem
@@ -101,8 +102,37 @@ class ForwardArtificialNeuralNectwork(object):
 
 
     def __str__(self):
-        # TODO: the string representation of weights
-        pass
+        """ Return the weight matrix string specified in the assignment
+        """
+        weight = self.weight * self.connectivity
+        strio = io.StringIO()
+        for i in range(self.dim_in, self.dim_node):
+            if i<self.dim_in+self.dim_hid and not self.hidden[i-self.dim_in]:   # no such hidden node
+                continue
+            strio.write('{:6.1f}'.format(weight[i][0]))
+            for j in range(1, self.dim_node-1):
+                if self.dim_in<=j<self.dim_in+self.dim_hid and not self.hidden[j-self.dim_in]:  # this node is not connected
+                    continue
+                strio.write(' {:6.1f}'.format(weight[i][j]))
+            if i < self.dim_node - 1:
+                strio.write('\n')
+        return strio.getvalue()
+
+
+    def __repr__(self):
+        """ Return the whole weight matrix string (even not connected)
+        """
+        weight = self.weight * self.connectivity
+        reprio = io.StringIO()
+        remain_lines = self.dim_node
+        for row in map(iter, weight):
+            reprio.write('{:6.1f}'.format(next(row)))
+            for ele in row:
+                reprio.write(' {:6.1f}'.format(ele))
+            if remain_lines > 1:
+                reprio.write('\n')
+                remain_lines -= 1
+        return reprio.getvalue()
 
 
     def initialize(self):
@@ -124,6 +154,10 @@ class ForwardArtificialNeuralNectwork(object):
         :return: None
         :rtype: None
         """
+        in_weights = weights    # first to append zero column as the last output (no out-degree)
+        weights = np.zeros((weights.shape[0], weights.shape[1]+1))
+        weights[:,:-1] = in_weights
+
         din, dout, dhid = self.dim_in, self.dim_out, self.dim_hid   # the max dim
         hid = weights.shape[0] - dout                               # this hidden dim
         if not (weights.shape[1]-din-dout==hid and (0<hid<=dhid)):
