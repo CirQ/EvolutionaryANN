@@ -135,14 +135,44 @@ class ForwardArtificialNeuralNectwork(object):
         return reprio.getvalue()
 
 
-    def initialize(self):
+    def initialize(self, num_hid, dense, w_range, seed=None):
         """ Initialize the ANN according to the rule specified in the paper.
 
-        :return: None
-        :rtype: None
+        :param num_hid: The initial number of hidden nodes
+        :type num_hid: int
+        :param dense: The initial connection density
+        :type dense: float
+        :param w_range: The inital connection weight range, in (-w_range, w_range)
+        :type w_range: float
+        :param seed: The random seed (for debugging purpose)
+        :type seed: int
         """
-        # TODO: to initiate the matrices
-        pass
+        if not (0 < num_hid <= self.dim_hid):
+            raise self.ANNException('hidden nodes should be within (0,{}]'.format(self.dim_hid))
+        if not (0 < dense <= 1):
+            raise self.ANNException('initial weight density should be within (0,1)')
+        if w_range <= 0:
+            raise self.ANNException('weight range should be positive')
+        if seed is not None:
+            np.random.seed(seed)
+
+        self.hidden[:num_hid] = True
+
+        # first make it fully connected
+        for i in range(self.dim_in, self.dim_node):
+            self.connectivity[i,:i] = True
+        for i, has_hidden in enumerate(self.hidden, start=self.dim_in):
+            if not has_hidden:
+                self.connectivity[i,:] = False
+                self.connectivity[:,i] = False
+        # then flip some connection with probability
+        for row in self.connectivity:
+            for j, has_con in enumerate(row):
+                if has_con and np.random.rand()>dense:
+                    row[j] = False
+
+        self.weight[:] = np.random.uniform(-w_range, w_range, self.weight.shape)
+        self.weight *= self.connectivity
 
 
     def construct(self, weights):
@@ -223,6 +253,9 @@ class EvolutionaryProgramming(object):
     def __init__(self):
         pass
 
+class EPNet(EvolutionaryProgramming):
+    def __init__(self):
+        super().__init__()
 
 
 class NParityProblem(object):
@@ -235,6 +268,8 @@ def main():
     parser = argparse.ArgumentParser(description='An N-parity problem solver based on evolutionary ANN')
     parser.add_argument('-s', type=int, required=True, help='An integer random seed', metavar='SEED', dest='seed')
     parser.add_argument('-n', default=5, type=int, help='The parameter N of N-parity problem', metavar='N', dest='n')
+    parser.add_argument('-d', default=0.75, type=float, help='The initial connection density of forward ANN', metavar='DENSE', dest='dense')
+    parser.add_argument('-r', default=10.0, type=float, help='The range of initial weights, from -R to R', metavar='R', dest='range')
     args = parser.parse_args()
 
     np.random.seed(args.seed)

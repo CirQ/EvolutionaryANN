@@ -45,9 +45,41 @@ class ParityNTest(unittest.TestCase):
 
 
 class FANNTest(unittest.TestCase):
-    def test_initialize(self):
-        # TODO: test initialize method
-        pass
+    def test_initialize_connectivity(self):
+        ann = ForwardArtificialNeuralNectwork(3, 3, 2)
+        ann.initialize(2, 1.0, 50)  # fully connected
+        expect_connectivity = [[False, False, False, False, False, False, False, False, False],
+                               [False, False, False, False, False, False, False, False, False],
+                               [False, False, False, False, False, False, False, False, False],
+                               [False, False, False, False, False, False, False, False, False],
+                               [True,  True,  True,  True,  False, False, False, False, False],
+                               [True,  True,  True,  True,  True,  False, False, False, False],
+                               [False, False, False, False, False, False, False, False, False],
+                               [True,  True,  True,  True,  True,  True,  False, False, False],
+                               [True,  True,  True,  True,  True,  True,  False, True,  False]]
+        expect_hidden = [True, True, False]
+        self.assertListEqual(ann.connectivity.tolist(), expect_connectivity)
+        self.assertListEqual(ann.hidden.tolist(), expect_hidden)
+
+    def test_initialize_dense(self):
+        ann = ForwardArtificialNeuralNectwork(100, 100, 1)
+        ann.initialize(100, 0.65, 10)
+        total_connect = 15050   # 101 + 102 + ... + 201
+        has_connect = ann.connectivity.sum()
+        self.assertTrue(0.62 <= has_connect/total_connect <= 0.68)
+
+    def test_initialize_noremalloc(self):
+        ann = ForwardArtificialNeuralNectwork(5, 5, 2)
+        id_weight = id(ann.weight)
+        id_connectivity = id(ann.connectivity)
+        id_hidden = id(ann.hidden)
+        ann.initialize(2, 0.4, 1)
+        self.assertEqual(id(ann.weight), id_weight)
+        self.assertEqual(id(ann.connectivity), id_connectivity)
+        self.assertEqual(id(ann.hidden), id_hidden)
+
+
+
 
     def test_construct_general(self):
         ann = ForwardArtificialNeuralNectwork(3, 2, 2)
@@ -129,6 +161,22 @@ class FANNTest(unittest.TestCase):
         for _, res, vec in genp8.all():
             result = ann.evaluate(vec)
             self.assertEqual(result[0]>0.5, not res)
+
+    def test_evaluate_noremalloc(self):
+        ann = ForwardArtificialNeuralNectwork(7, 7, 1)
+        id_weight = id(ann.weight)
+        id_connectivity = id(ann.connectivity)
+        id_hidden = id(ann.hidden)
+        weights_out = '''-42.8  -32.4   0      -5.6  -23.6  -33.6  -33.6   41.6      0      0     0
+                         -75.3  -32.0   43.2  -41.1  -34.5  -34.8  -34.8   39.8  -58.9      0     0
+                         -85.0  -28.1   28.6  -28.0  -28.0  -28.2  -28.2   29.3  -47.6  -41.3     0
+                          59.9   12.9  -13.5   13.0   13.0   13.0   13.0  -13.4      0      0  81.8
+                      '''
+        weights = np.fromstring(weights_out, sep=' ').reshape(4, -1)
+        ann.construct(weights)
+        self.assertEqual(id(ann.weight), id_weight)
+        self.assertEqual(id(ann.connectivity), id_connectivity)
+        self.assertEqual(id(ann.hidden), id_hidden)
 
     def test_tostr(self):
         expected_out = ''' -42.8  -32.4    0.0   -5.6  -23.6  -33.6  -33.6   41.6    0.0    0.0    0.0
