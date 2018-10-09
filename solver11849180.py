@@ -30,7 +30,7 @@ class ParityNGenerator(object):
         self.bound = 2**N
 
     def __call__(self, *args, **kwargs):
-        """ Get a binary representation of integer num
+        """ Get a binary representation of integer num, and the answer of N-Parity
         """
         if not (len(args)==1 and not bool(kwargs)):
             raise self.ParityNException('only one argument is required')
@@ -42,7 +42,7 @@ class ParityNGenerator(object):
         while num > 0:
             vec_num[i] = num%2
             num, i = num//2, i-1
-        return vec_num
+        return vec_num, vec_num.sum()%2==0
 
     def all(self):
         """ Return all binary vectors within self.bound
@@ -51,9 +51,8 @@ class ParityNGenerator(object):
         :rtype: generator
         """
         for num in range(self.bound):
-            vec = self(num)
-            out = vec.sum() % 2 == 0
-            yield num, out, self(num)
+            vec, exp = self(num)
+            yield num, exp, vec
 
 
 
@@ -171,7 +170,7 @@ class ForwardArtificialNeuralNectwork(object):
                 if has_con and np.random.rand()>dense:
                     row[j] = False
 
-        self.weight[:] = np.random.uniform(-w_range, w_range, self.weight.shape)
+        self.weight[:,:] = np.random.uniform(-w_range, w_range, self.weight.shape)
         self.weight *= self.connectivity
 
 
@@ -180,14 +179,12 @@ class ForwardArtificialNeuralNectwork(object):
 
         :param weights: a weight matrix in the format specified by the assignment
         :type weights: np.ndarray
-
         :return: None
         :rtype: None
         """
         in_weights = weights    # first to append zero column as the last output (no out-degree)
         weights = np.zeros((weights.shape[0], weights.shape[1]+1))
         weights[:,:-1] = in_weights
-
         din, dout, dhid = self.dim_in, self.dim_out, self.dim_hid   # the max dim
         hid = weights.shape[0] - dout                               # this hidden dim
         if not (weights.shape[1]-din-dout==hid and (0<hid<=dhid)):
@@ -219,15 +216,14 @@ class ForwardArtificialNeuralNectwork(object):
         :return: the nodes output
         :rtype: np.ndarray
         """
-        bias = -np.ones(1)
-        tail = np.zeros(self.dim_hid+self.dim_out)
-        nodes = np.concatenate((bias, x, tail), axis=0)
+        bias = -np.ones((x.shape[0], 1))
+        tail = np.zeros((x.shape[0], self.dim_hid+self.dim_out))
+        nodes = np.concatenate((bias, x, tail), axis=1)
         weight = self.weight * self.connectivity
         for i in range(self.dim_in, self.dim_in+self.dim_hid+self.dim_out):
             net = nodes.dot(weight[i])
-            nodes[i] = self.__sigmoid(net)
-
-        nodes[self.dim_in:self.dim_in+self.dim_hid] *= self.hidden
+            nodes[:,i] = self.__sigmoid(net)
+        nodes[:,self.dim_in:self.dim_in+self.dim_hid] *= self.hidden
         return nodes
 
 
@@ -241,24 +237,38 @@ class ForwardArtificialNeuralNectwork(object):
         :param lr: the learning rate
         :type lr: float
         """
-        if not (0 < lr < 1):
-            raise self.ANNException('learning rate cannot be negative or exceeds 1')
-
         gamma = np.zeros(nodes.shape)   # for calculating delta = gamma * sigmoid'(x)
         delta = np.zeros(nodes.shape)   # the delta variable (F_net in the book)
-
-        gamma[-self.dim_out:] = nodes[-self.dim_out:] - expected    # delta of output nodes
-        delta[-1] = gamma[-1]
+        gamma[:,-self.dim_out:] = nodes[:,-self.dim_out:] - expected    # delta of output nodes
+        delta[:,-1] = gamma[:,-1]
         for i in range(self.dim_node-1, self.dim_in-1, -1):
             if i+1 < self.dim_node: # last node has no backpropagation
-                gamma[i] += delta[i+1:].dot(self.weight[i+1:,i])
-            delta[i] = self.__sigmoid(nodes[i], True) * gamma[i]
+                gamma[:,i] += delta[:,i+1:].dot(self.weight[i+1:,i])
+            delta[:,i] = self.__sigmoid(nodes[:,i], True) * gamma[:,i]
+        self.weight -= lr * np.matmul(delta.transpose(), nodes) # update weights
 
-        self.weight -= lr * np.outer(delta, nodes)  # update weights
 
+    def train(self, X, y, lr=0.3, epoch=100):
+        """ Train the network with back propagation
 
-    def train(self):
-        pass
+        :param X: the input matrix (or vector)
+        :type X: np.ndarray
+        :param y: the actual value of output
+        :type y: np.ndarray
+        :param lr: the learning rate
+        :type lr: float
+        :param epoch: the epochs of training
+        :type epoch: int
+        """
+        if len(y.shape) == 1:
+            y = y.reshape((-1, 1))
+        if not (0 < lr < 1):
+            raise self.ANNException('learning rate cannot be negative or exceeds 1')
+        if epoch <= 0:
+            raise self.ANNException('epoch must be postitive integer')
+        for _ in range(epoch):
+            nodes = self._forward(X)
+            self._backpropagate(y, nodes, lr)
 
 
     def evaluate(self, x):
@@ -269,24 +279,25 @@ class ForwardArtificialNeuralNectwork(object):
         :return: the value of evaluated ANN
         :rtype: np.ndarry
         """
-        if x.shape != (self.dim_in-1,):
+        if len(x.shape) == 1:
+            x = x.reshape((1, -1))
+        if x.shape[1] != self.dim_in-1:
             raise self.ANNException('input dimension not matching')
         nodes = self._forward(x)
-        return nodes[-self.dim_out:]
+        return nodes[:,-self.dim_out:]
 
 
-    def test(self):
-        pn = ParityNGenerator(7)
-        vec = pn(22)
-        exp = np.array([vec.sum() % 2 == 0])
-        for i in range(1000):
-            nodes = self._forward(vec)
-            self._backpropagate(exp, nodes, 0.2)
+    def copy(self):
+        """ Make a hard copy of this ANN
 
-
-
-
-
+        :return: new copy of this ANN
+        :rtype: ForwardArtificialNeuralNectwork
+        """
+        new_ann = ForwardArtificialNeuralNectwork(self.dim_in-1, self.dim_hid, self.dim_out)
+        new_ann.weight[:,:] = self.weight
+        new_ann.connectivity[:,:] = self.connectivity
+        new_ann.hidden[:] = self.hidden
+        return new_ann
 
 
 

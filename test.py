@@ -5,7 +5,6 @@
 
 import numpy as np
 
-from util import *
 from solver11849180 import ParityNGenerator, ForwardArtificialNeuralNectwork
 
 
@@ -22,7 +21,9 @@ class ParityNTest(unittest.TestCase):
 
     def test_call(self):
         pn = ParityNGenerator(4)
-        self.assertTupleEqual(tuple(pn(11)), (True, False, True, True))
+        vec, exp = pn(11)
+        self.assertTupleEqual(tuple(vec), (True, False, True, True))
+        self.assertEqual(exp, False)
         with self.assertRaises(ParityNGenerator.ParityNException):
             pn(16)
         with self.assertRaises(ParityNGenerator.ParityNException):
@@ -78,9 +79,6 @@ class FANNTest(unittest.TestCase):
         self.assertEqual(id(ann.connectivity), id_connectivity)
         self.assertEqual(id(ann.hidden), id_hidden)
 
-
-
-
     def test_construct_general(self):
         ann = ForwardArtificialNeuralNectwork(3, 2, 2)
         weights = [[1,3,2,1,0,0],
@@ -134,6 +132,21 @@ class FANNTest(unittest.TestCase):
         self.assertListEqual(ann.connectivity.tolist(), expect_connectivity)
         self.assertListEqual(ann.hidden.tolist(), expect_hidden)
 
+    def test_train_given6(self):
+        # mean square error function
+        mse = lambda y1,y2: ((y1-y2)**2/2).sum()
+        for _ in range(10):
+            ann = ForwardArtificialNeuralNectwork(6, 6, 1)
+            ann.initialize(3, 1.0, 9)
+            genp6 = ParityNGenerator(6)
+            _, res, vec = map(np.array, zip(*genp6.all()))
+            before = ann.evaluate(vec).reshape(-1)
+            be_mse = mse(before, res)
+            ann.train(vec, res)
+            after = ann.evaluate(vec).reshape(-1)
+            af_mse = mse(after, res)
+            self.assertLessEqual(af_mse, be_mse)
+
     def test_evaluate_given7(self):
         weights_out = '''-42.8  -32.4   0      -5.6  -23.6  -33.6  -33.6   41.6      0      0     0
                          -75.3  -32.0   43.2  -41.1  -34.5  -34.8  -34.8   39.8  -58.9      0     0
@@ -141,12 +154,12 @@ class FANNTest(unittest.TestCase):
                           59.9   12.9  -13.5   13.0   13.0   13.0   13.0  -13.4      0      0  81.8
                       '''
         weights = np.fromstring(weights_out, sep=' ').reshape(4, -1)
-        genp7 = ParityNGenerator(7)
         ann = ForwardArtificialNeuralNectwork(7, 7, 1)
         ann.construct(weights)
+        genp7 = ParityNGenerator(7)
         for _, res, vec in genp7.all():
             result = ann.evaluate(vec)
-            self.assertEqual(result[0]>0.5, not res)    # use not res since the condition is negating in paper
+            self.assertEqual(result>0.5, not res)   # use not res since the condition is negating in paper
 
     def test_evaluate_given8(self):
         weights_out = '''-12.4   25.2   27.7  -29.4  -28.9  -29.7  -25.4  -28.5   27.8      0      0     0
@@ -155,12 +168,13 @@ class FANNTest(unittest.TestCase):
                           45.7  -10.0  -11.0   10.0    9.9    9.4   10.0    9.6  -11.4    6.8    2.3  76.3
                       '''
         weights = np.fromstring(weights_out, sep=' ').reshape(4, -1)
-        genp8 = ParityNGenerator(8)
         ann = ForwardArtificialNeuralNectwork(8, 8, 1)
         ann.construct(weights)
-        for _, res, vec in genp8.all():
-            result = ann.evaluate(vec)
-            self.assertEqual(result[0]>0.5, not res)
+        genp8 = ParityNGenerator(8)
+        _, res, vec = zip(*genp8.all())
+        result = ann.evaluate(np.array(vec))
+        for yhat, y in zip(result, res):
+            self.assertEqual(yhat>0.5, not y)   # the same as the case given7
 
     def test_evaluate_noremalloc(self):
         ann = ForwardArtificialNeuralNectwork(7, 7, 1)
@@ -177,6 +191,17 @@ class FANNTest(unittest.TestCase):
         self.assertEqual(id(ann.weight), id_weight)
         self.assertEqual(id(ann.connectivity), id_connectivity)
         self.assertEqual(id(ann.hidden), id_hidden)
+
+    def test_new(self):
+        ann = ForwardArtificialNeuralNectwork(3, 3, 2)
+        ann.initialize(2, 0.8, 3)
+        off = ann.copy()
+        self.assertIsNot(ann.weight, off.weight)
+        self.assertIsNot(ann.connectivity, off.connectivity)
+        self.assertIsNot(ann.hidden, off.hidden)
+        self.assertTrue(np.array_equal(ann.weight, off.weight))
+        self.assertTrue(np.array_equal(ann.connectivity, off.connectivity))
+        self.assertTrue(np.array_equal(ann.hidden, off.hidden))
 
     def test_tostr(self):
         expected_out = ''' -42.8  -32.4    0.0   -5.6  -23.6  -33.6  -33.6   41.6    0.0    0.0    0.0
@@ -218,14 +243,12 @@ class FANNTest(unittest.TestCase):
 
 
 def ann_init():
-    weights_out = '''-42.8  -32.4   0      -5.6  -23.6  -33.6  -33.6   41.6      0      0     0
-                     -75.3  -32.0   43.2  -41.1  -34.5  -34.8  -34.8   39.8  -58.9      0     0
-                     -85.0  -28.1   28.6  -28.0  -28.0  -28.2  -28.2   29.3  -47.6  -41.3     0
-                      59.9   12.9  -13.5   13.0   13.0   13.0   13.0  -13.4      0      0  81.8
-                  '''
-    weights = np.fromstring(weights_out, sep=' ').reshape(4, -1)
-    ann = ForwardArtificialNeuralNectwork(7, 7, 1)
-    ann.construct(weights)
+    ann = ForwardArtificialNeuralNectwork(5, 5, 1)
+    ann.initialize(2, 0.9, 5)
+    pn = ParityNGenerator(5)
+    _, y, X = map(np.array, zip(*pn.all()))
+
+    ann.train(X, y, lr=0.5, epoch=1000)
 
 
 
