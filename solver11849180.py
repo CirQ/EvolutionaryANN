@@ -211,6 +211,56 @@ class ForwardArtificialNeuralNectwork(object):
         self.hidden[:hid] = True
 
 
+    def _forward(self, x):
+        """ Forward a vector to get the outputs of all nodes
+
+        :param x: the vector represents all input nodes
+        :type x: np.ndarray
+        :return: the nodes output
+        :rtype: np.ndarray
+        """
+        bias = -np.ones(1)
+        tail = np.zeros(self.dim_hid+self.dim_out)
+        nodes = np.concatenate((bias, x, tail), axis=0)
+        weight = self.weight * self.connectivity
+        for i in range(self.dim_in, self.dim_in+self.dim_hid+self.dim_out):
+            net = nodes.dot(weight[i])
+            nodes[i] = self.__sigmoid(net)
+
+        nodes[self.dim_in:self.dim_in+self.dim_hid] *= self.hidden
+        return nodes
+
+
+    def _backpropagate(self, expected, nodes, lr):
+        """ Back-propagating algorithm, for updating weights
+
+        :param expected: the expected output vector
+        :type expected: np.ndarray
+        :param nodes: the output of all nodes in ANN
+        :type nodes: np.ndarray
+        :param lr: the learning rate
+        :type lr: float
+        """
+        if not (0 < lr < 1):
+            raise self.ANNException('learning rate cannot be negative or exceeds 1')
+
+        gamma = np.zeros(nodes.shape)   # for calculating delta = gamma * sigmoid'(x)
+        delta = np.zeros(nodes.shape)   # the delta variable (F_net in the book)
+
+        gamma[-self.dim_out:] = nodes[-self.dim_out:] - expected    # delta of output nodes
+        delta[-1] = gamma[-1]
+        for i in range(self.dim_node-1, self.dim_in-1, -1):
+            if i+1 < self.dim_node: # last node has no backpropagation
+                gamma[i] += delta[i+1:].dot(self.weight[i+1:,i])
+            delta[i] = self.__sigmoid(nodes[i], True) * gamma[i]
+
+        self.weight -= lr * np.outer(delta, nodes)  # update weights
+
+
+    def train(self):
+        pass
+
+
     def evaluate(self, x):
         """ Calculate the output of ANN for input x.
 
@@ -221,21 +271,34 @@ class ForwardArtificialNeuralNectwork(object):
         """
         if x.shape != (self.dim_in-1,):
             raise self.ANNException('input dimension not matching')
-        bias = -np.ones(1)
-        tail = np.zeros(self.dim_hid+self.dim_out)
-        x = np.concatenate((bias, x, tail), axis=0)
-
-        weight = self.weight * self.connectivity
-        for i in range(self.dim_in, self.dim_in+self.dim_hid+self.dim_out):
-            net = x.dot(weight[i])
-            x[i] = self.__sigmoid(net)
-        return x[-self.dim_out:]
+        nodes = self._forward(x)
+        return nodes[-self.dim_out:]
 
 
-    def backpropagate(self, lr):
-        # TODO: bp algorithm
+    def test(self):
+        pn = ParityNGenerator(7)
+        vec = pn(22)
+        exp = np.array([vec.sum() % 2 == 0])
+        for i in range(1000):
+            nodes = self._forward(vec)
+            self._backpropagate(exp, nodes, 0.2)
+
+
+
+
+
+
+
+
+    # TODO: four structural mutations
+    def node_deletion(self):
         pass
-
+    def connect_deletion(self):
+        pass
+    def node_addition(self):
+        pass
+    def connect_addition(self):
+        pass
 
 
 
