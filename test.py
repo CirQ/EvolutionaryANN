@@ -242,20 +242,8 @@ class FANNTest(unittest.TestCase):
         self.assertEqual(repr(ann), expected_out)
 
 
-def ann_init():
-    ann = ForwardArtificialNeuralNectwork(5, 5, 1)
-    ann.initialize(2, 0.9, 5)
-    pn = ParityNGenerator(5)
-    _, y, X = map(np.array, zip(*pn.all()))
-
-    ann.train(X, y, lr=0.5, epoch=1000)
-
-
-
-
 
 
 
 if __name__ == '__main__':
     unittest.main()
-    # ann_init()
