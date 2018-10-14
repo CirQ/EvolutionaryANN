@@ -9,14 +9,14 @@ from solver11849180 import ParityNGenerator, ForwardArtificialNeuralNectwork, EP
 from util import annotated_timer
 
 
-@annotated_timer('run 1000 epoch')
+@annotated_timer('run bp then sa')
 def ann_run():
     ann = ForwardArtificialNeuralNectwork(5, 5, 1)
-    ann.initialize(2, 1.0)
+    ann.initialize(2, 1.0, 0.0, 1.0)
     genp5 = ParityNGenerator(5)
     _, res, vec = map(np.array, zip(*genp5.all()))
 
-    ann.train(vec, res, epoch=1000)
+    ann.train(vec, res, lr=0.3, epoch=1000)
 
     result = (ann.evaluate(vec) > 0.5)
     for y, yhat in zip(res, result):
@@ -33,6 +33,7 @@ def ann_run():
             print(y, yhat)
 
 
+@annotated_timer('test epnet')
 def epnet_run():
     epnet = EPNet(20, 5, 5, 1)
     epnet.test()
@@ -40,5 +41,5 @@ def epnet_run():
 
 
 if __name__ == '__main__':
-    # epnet_run()
-    ann_run()
+    epnet_run()
+    # ann_run()

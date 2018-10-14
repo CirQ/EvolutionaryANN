@@ -50,7 +50,7 @@ class ParityNTest(unittest.TestCase):
 class FANNTest(unittest.TestCase):
     def test_initialize_connectivity(self):
         ann = ForwardArtificialNeuralNectwork(3, 3, 2)
-        ann.initialize(2, 1.0, 50)  # fully connected
+        ann.initialize(2, 1.0, 0, 3)    # fully connected
         expect_connectivity = [[False, False, False, False, False, False, False, False, False],
                                [False, False, False, False, False, False, False, False, False],
                                [False, False, False, False, False, False, False, False, False],
@@ -66,7 +66,7 @@ class FANNTest(unittest.TestCase):
 
     def test_initialize_dense(self):
         ann = ForwardArtificialNeuralNectwork(100, 100, 1)
-        ann.initialize(100, 0.65, 10)
+        ann.initialize(100, 0.65, 0, 10)
         total_connect = 15050   # 101 + 102 + ... + 201
         has_connect = ann.connectivity.sum()
         self.assertTrue(0.62 <= has_connect/total_connect <= 0.68)
@@ -76,7 +76,7 @@ class FANNTest(unittest.TestCase):
         id_weight = id(ann.weight)
         id_connectivity = id(ann.connectivity)
         id_hidden = id(ann.hidden)
-        ann.initialize(2, 0.4, 1)
+        ann.initialize(2, 0.4, 1, 1)
         self.assertEqual(id(ann.weight), id_weight)
         self.assertEqual(id(ann.connectivity), id_connectivity)
         self.assertEqual(id(ann.hidden), id_hidden)
@@ -134,18 +134,17 @@ class FANNTest(unittest.TestCase):
         self.assertListEqual(ann.connectivity.tolist(), expect_connectivity)
         self.assertListEqual(ann.hidden.tolist(), expect_hidden)
 
-    @unittest.skip('Initialization has changed')
     def test_train_given6(self):
         # mean square error function
         mse = lambda y1,y2: ((y1-y2)**2/2).sum()
         for _ in range(10):
             ann = ForwardArtificialNeuralNectwork(6, 6, 1)
-            ann.initialize(3, 1.0, 9)
+            ann.initialize(3, 1.0, 0, 1)
             genp6 = ParityNGenerator(6)
             _, res, vec = map(np.array, zip(*genp6.all()))
             before = ann.evaluate(vec)
             be_mse = mse(before, res)
-            ann.train(vec, res)
+            ann.train(vec, res, 0.1, 1000)
             after = ann.evaluate(vec)
             af_mse = mse(after, res)
             self.assertLessEqual(af_mse, be_mse)
@@ -198,7 +197,7 @@ class FANNTest(unittest.TestCase):
 
     def test_new(self):
         ann = ForwardArtificialNeuralNectwork(3, 3, 2)
-        ann.initialize(2, 0.8, 3)
+        ann.initialize(2, 0.8, 0, 2)
         off = ann.copy()
         self.assertIsNot(ann.weight, off.weight)
         self.assertIsNot(ann.connectivity, off.connectivity)

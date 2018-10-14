@@ -4,9 +4,11 @@
 # Created Time: 2018-09-23 18:07:29
 
 import argparse
+import collections
 import functools
 import heapq
 import io
+import itertools
 import queue
 import threading
 
@@ -138,7 +140,7 @@ class ForwardArtificialNeuralNectwork(object):
         return reprio.getvalue()
 
 
-    def initialize(self, num_hid, dense, w_range=1.0, mean=0.0, stddev=1.0, seed=None):
+    def initialize(self, num_hid, dense, mean, stddev, seed=None):
         """ Initialize the ANN according to the rule specified in the paper.
 
         :param num_hid: The initial number of hidden nodes
@@ -156,8 +158,6 @@ class ForwardArtificialNeuralNectwork(object):
             raise self.ANNException('hidden nodes should be within (0,{}]'.format(self.dim_hid))
         if not (0 < dense <= 1):
             raise self.ANNException('initial weight density should be within (0,1)')
-        # if w_range <= 0:
-        #     raise self.ANNException('weight range should be positive')
         if seed is not None:
             np.random.seed(seed)
 
@@ -255,7 +255,7 @@ class ForwardArtificialNeuralNectwork(object):
         self.weight -= lr * np.matmul(delta.transpose(), nodes) # update weights
 
 
-    def train(self, X, y, lr=0.3, epoch=100):
+    def train(self, X, y, lr, epoch):
         """ Train the network with back propagation (fixed learning rate)
 
         :param X: the input matrix (or vector)
@@ -342,7 +342,24 @@ class ForwardArtificialNeuralNectwork(object):
         'linear': lambda t, k: max(t - 0.005, 0.001),  # TODO: new cooldown
         'exponential': lambda t, k: 0.99 * t,
     }
-    def simul_anneal(self, X, y, max_steps, temperature=1, cooldown='exponential', mean=0.0, stddev=1.0):
+    def simul_anneal(self, X, y, max_steps, temperature=1.0, cooldown='exponential', mean=0.0, stddev=1.0):
+        """ Simulated annealing algorithm to optimize the ANN
+
+        :param X: the input matrix
+        :type X: np.ndarray
+        :param y: the ground-truth prediction
+        :type y: np.ndarray
+        :param max_steps: max iteration of annealing
+        :type max_steps: int
+        :param temperature: the initial temperature
+        :type temperature: float
+        :param cooldown: the cooldown method of temperature
+        :type cooldown: string
+        :param mean: mean value of normal distribution (to generate neighbor)
+        :type mean: float
+        :param stddev: standard deviation of normal distribution (to generate neighbor)
+        :type stddev: float
+        """
         cooldown = self.cooldown_method[cooldown]
         for i in range(max_steps):
             temperature = cooldown(temperature, i)
@@ -395,6 +412,16 @@ class PriorityQueue(queue.PriorityQueue):
         self.mutating = threading.Condition(self.mutex)
 
 
+    def __iter__(self):
+        """ Iterate the priority queue, never use it in parallel context
+            and don't modify the queue while iterating
+
+        :return: iter(self.queue)
+        :rtype: iterator
+        """
+        return iter(self.queue)
+
+
     def put(self, item, priority=None, *args, **kwargs):
         """ the same as put except that priority must be specified
         """
@@ -411,15 +438,100 @@ class PriorityQueue(queue.PriorityQueue):
 
 
     def constraint(self):
+        """ Limit this queue to the max_size
+        """
         with self.mutating:
             self.queue = heapq.nsmallest(self.max_size, self.queue)
             heapq.heapify(self.queue)
 
 
+    def merge(self, queue2):
+        """ Merge this queue with another queue
+
+        :param queue2: another queue (should be iterable)
+        :type queue2: Iterable
+        """
+        with self.mutating:
+            self.queue = list(heapq.merge(self.queue, queue2))
+            heapq.heapify(self.queue)
+
+
 
 class EPNet(object):
-    def __init__(self, population_size):
-        pass
+    """ EPNet, referenced from paper Section III
+    """
+
+    Priority = collections.namedtuple('Priority', ['fitness', 'sucess'])
+
+    def __init__(self, population_size, dim_in, dim_hid, dim_out, dense=1.0, mean=0.0, stddev=1.0, init_epoch=500):
+        self.population_size = population_size
+        self.population = PriorityQueue(max_size=population_size)
+        self.__generate = functools.partial(ForwardArtificialNeuralNectwork,
+                                            m_in=dim_in, n_hid=dim_hid, n_out=dim_out)
+        self.__dense = dense
+        self.__mean = mean
+        self.__stddev = stddev
+        self.__init_epoch = init_epoch
+
+
+    @staticmethod
+    def _fitness(individual, X, y):
+        """ The fitness of an individual
+
+        :param individual: an individual
+        :type individual: ForwardArtificialNeuralNectwork
+        :return: the fitness value
+        :rtype: float
+        """
+        return individual._energy(X, y)
+
+
+    def _generate_population(self, X, y, num_hid):
+        for _ in range(self.population_size):
+            individual = self.__generate()
+            individual.initialize(num_hid, dense=self.__dense, mean=self.__mean, stddev=self.__stddev)
+            fitness = self._fitness(individual, X, y)
+            priority = self.Priority(fitness, False)
+            self.population.put(individual, priority=priority)
+
+
+    def _initial_training(self, X, y, lr):
+
+        # TODO: make the threshold tuneable
+        THRESHOLD = 1.0
+
+        new_population = PriorityQueue(max_size=self.population_size)
+        for (fitness, sucess), individual in self.population:
+            individual.train(X, y, lr, epoch=self.__init_epoch)
+            new_fitness = self._fitness(individual, X, y)
+            if new_fitness <= fitness - THRESHOLD:
+                sucess = True
+            priority = self.Priority(new_fitness, sucess)
+            new_population.put(individual, priority=priority)
+        self.population.merge(new_population)
+        self.population.constraint()
+
+
+    def run(self, X, y, num_hid, lr):
+
+        self._generate_population(X, y, num_hid)
+
+        self._initial_training(X, y, lr)
+
+
+        print(self.population.qsize())
+
+
+        # for i in itertools.count():
+        #     pass
+
+
+
+    def test(self):
+        genp5 = ParityNGenerator(5)
+        _, res, vec = map(np.array, zip(*genp5.all()))
+        self.run(vec, res, num_hid=2, lr=0.3)
+
 
 
 
