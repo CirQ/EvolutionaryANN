@@ -4,7 +4,10 @@
 # Created Time: 2018-09-23 18:07:29
 
 import argparse
+import heapq
 import io
+import queue
+import threading
 
 import numpy as np
 
@@ -134,15 +137,17 @@ class ForwardArtificialNeuralNectwork(object):
         return reprio.getvalue()
 
 
-    def initialize(self, num_hid, dense, w_range, seed=None):
+    def initialize(self, num_hid, dense, w_range=1.0, mean=0.0, stddev=1.0, seed=None):
         """ Initialize the ANN according to the rule specified in the paper.
 
         :param num_hid: The initial number of hidden nodes
         :type num_hid: int
         :param dense: The initial connection density
         :type dense: float
-        :param w_range: The inital connection weight range, in (-w_range, w_range)
-        :type w_range: float
+        :param mean: The mean value of a normal distribution
+        :type mean: float
+        :param stddev: The standard deviation of a normal distribution
+        :type stddev: float
         :param seed: The random seed (for debugging purpose)
         :type seed: int
         """
@@ -150,8 +155,8 @@ class ForwardArtificialNeuralNectwork(object):
             raise self.ANNException('hidden nodes should be within (0,{}]'.format(self.dim_hid))
         if not (0 < dense <= 1):
             raise self.ANNException('initial weight density should be within (0,1)')
-        if w_range <= 0:
-            raise self.ANNException('weight range should be positive')
+        # if w_range <= 0:
+        #     raise self.ANNException('weight range should be positive')
         if seed is not None:
             np.random.seed(seed)
 
@@ -170,7 +175,8 @@ class ForwardArtificialNeuralNectwork(object):
                 if has_con and np.random.rand()>dense:
                     row[j] = False
 
-        self.weight[:,:] = np.random.uniform(-w_range, w_range, self.weight.shape)
+        # self.weight[:,:] = np.random.uniform(-w_range, w_range, self.weight.shape)
+        self.weight[:,:] = np.random.normal(mean, stddev, self.weight.shape)
         self.weight *= self.connectivity
 
 
@@ -249,7 +255,7 @@ class ForwardArtificialNeuralNectwork(object):
 
 
     def train(self, X, y, lr=0.3, epoch=100):
-        """ Train the network with back propagation
+        """ Train the network with back propagation (fixed learning rate)
 
         :param X: the input matrix (or vector)
         :type X: np.ndarray
@@ -300,6 +306,55 @@ class ForwardArtificialNeuralNectwork(object):
         return new_ann
 
 
+    def _energy(self, X, y):
+        """ Calculate the energy of this ANN
+
+        :param X: the input matrix
+        :type X: np.ndarray
+        :param y: the corresponding result (supervised)
+        :type y: np.ndarray
+        :return: the energy of current ANN
+        :rtype: float
+        """
+        yhat = self.evaluate(X).reshape(-1)
+        loss = ((y - yhat) ** 2).sum() / 2
+        return loss
+
+
+    def _to_neighbor(self, mean, stddev):
+        """ Move the current network to its neighbor, and return the move
+
+        :param mean: mean of a normal distribution
+        :type mean: float
+        :param stddev: standard deviation of a normal distribution
+        :type stddev: float
+        :return: the moves to the neighbor
+        :rtype: np.ndarray
+        """
+        move = np.random.normal(mean, stddev, self.weight.shape)
+        move *= self.connectivity
+        self.weight += move
+        return move
+
+
+    cooldown_method = {
+        'linear': lambda t, k: max(t - 0.005, 0.001),  # TODO: new cooldown
+        'exponential': lambda t, k: 0.99 * t,
+    }
+    def simul_anneal(self, X, y, max_steps, temperature=1, cooldown='exponential', mean=0.0, stddev=1.0):
+        cooldown = self.cooldown_method[cooldown]
+        for i in range(max_steps):
+            temperature = cooldown(temperature, i)
+            before_energy = self._energy(X, y)
+            move = self._to_neighbor(mean, stddev)
+            after_energy = self._energy(X, y)
+            dE = after_energy - before_energy
+            if dE < 0.0 or np.exp(-dE/temperature) > np.random.rand():
+                # accept the new state
+                pass
+            else:
+                self.weight -= move
+
 
     # TODO: four structural mutations
     def node_deletion(self):
@@ -313,23 +368,61 @@ class ForwardArtificialNeuralNectwork(object):
 
 
 
-
-
-
-
-class SimulatedAnnealingSolver(object):
-    def __init__(self):
+class PriorityQueue(queue.PriorityQueue):
+    """ Class of a priority queue, seperate priority and item. Also is a min heap
+    """
+    class PQueueException(Exception):
         pass
 
 
+    def __init__(self, max_size=0):
+        """ The constructor of Priority Queue
 
-class EvolutionaryProgramming(object):
-    def __init__(self):
+        :param max_size: the max_size of queue, but may exceed in runtime
+        :type max_size: int
+        """
+        # max_size is different to maxsize from the superclass, the queue is
+        # initialized to be infinite (by setting maxsize to 9), but will shrink
+        # to max_size whenever self.constraint is called
+        super().__init__(maxsize=0)
+        self.max_size = max_size
+
+        # just like the mutex initialization in the Queue's constructor,
+        # ref: https://github.com/python/cpython/blob/3.7/Lib/queue.py#L37
+        self.mutating = threading.Condition(self.mutex)
+
+
+    def put(self, item, priority=None, *args, **kwargs):
+        """ the same as put except that priority must be specified
+        """
+        if priority is None:
+            raise self.PQueueException('priority must be specified')
+        super().put((priority, item), *args, **kwargs)
+
+
+    def get(self, *args, **kwargs):
+        """ the same as get except that priority and item is seperated
+        """
+        priority, item = super().get(*args, **kwargs)
+        return priority, item
+
+
+    def constraint(self):
+        with self.mutating:
+            self.queue = heapq.nsmallest(self.max_size, self.queue)
+            heapq.heapify(self.queue)
+
+
+
+
+
+
+
+
+class EPNet(object):
+    def __init__(self, population_size):
         pass
 
-class EPNet(EvolutionaryProgramming):
-    def __init__(self):
-        super().__init__()
 
 
 class NParityProblem(object):
