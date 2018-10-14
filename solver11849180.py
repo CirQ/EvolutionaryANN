@@ -4,6 +4,7 @@
 # Created Time: 2018-09-23 18:07:29
 
 import argparse
+import functools
 import heapq
 import io
 import queue
@@ -55,7 +56,7 @@ class ParityNGenerator(object):
         """
         for num in range(self.bound):
             vec, exp = self(num)
-            yield num, exp, vec
+            yield num, np.array([exp]), vec
 
 
 
@@ -316,7 +317,7 @@ class ForwardArtificialNeuralNectwork(object):
         :return: the energy of current ANN
         :rtype: float
         """
-        yhat = self.evaluate(X).reshape(-1)
+        yhat = self.evaluate(X)
         loss = ((y - yhat) ** 2).sum() / 2
         return loss
 
@@ -375,7 +376,7 @@ class PriorityQueue(queue.PriorityQueue):
         pass
 
 
-    def __init__(self, max_size=0):
+    def __init__(self, max_size):
         """ The constructor of Priority Queue
 
         :param max_size: the max_size of queue, but may exceed in runtime
@@ -384,6 +385,8 @@ class PriorityQueue(queue.PriorityQueue):
         # max_size is different to maxsize from the superclass, the queue is
         # initialized to be infinite (by setting maxsize to 9), but will shrink
         # to max_size whenever self.constraint is called
+        if max_size <= 0:
+            raise self.PQueueException('max_size must be positive')
         super().__init__(maxsize=0)
         self.max_size = max_size
 
@@ -411,11 +414,6 @@ class PriorityQueue(queue.PriorityQueue):
         with self.mutating:
             self.queue = heapq.nsmallest(self.max_size, self.queue)
             heapq.heapify(self.queue)
-
-
-
-
-
 
 
 

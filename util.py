@@ -24,3 +24,13 @@ def annotated_timer(func_name):
             return result
         return wrapper
     return timer
+
+def write_2out(format_str, *args):
+    content = format_str.format(*args)
+    with iolock:
+        sys.stdout.write(content)
+
+def write_2err(format_str, *args):
+    content = format_str.format(*args)
+    with iolock:
+        sys.stderr.write(content)
