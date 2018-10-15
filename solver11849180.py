@@ -376,7 +376,7 @@ class ForwardArtificialNeuralNectwork(object):
         'linear': lambda t, k: max(t - 0.005, 0.001),  # TODO: new cooldown
         'exponential': lambda t, k: 0.99 * t,
     }
-    def simul_anneal(self, X, y, temperature, steps, cooldown='exponential', mean=0.0, stddev=1.0, quit=1e-6):
+    def simul_anneal(self, X, y, temperature, steps, cooldown='exponential', mean=0.0, stddev=1.0, quit=1e-4):
         """ Simulated annealing algorithm to optimize the ANN
 
         :param X: the input matrix
@@ -393,6 +393,8 @@ class ForwardArtificialNeuralNectwork(object):
         :type mean: float
         :param stddev: standard deviation of normal distribution (to generate neighbor)
         :type stddev: float
+        :param quit: energy difference threshold to quit optimization
+        :type quit: float
         """
         cooldown = self.cooldown_method[cooldown]
         for i in range(steps):
@@ -511,7 +513,9 @@ class PriorityQueue(queue.PriorityQueue):
         :return: the top element
         :rtype: element
         """
-        return self.top_k(1)[0]
+        with self.mutating:
+            top = self.queue[0]
+        return top
 
 
 
@@ -558,8 +562,7 @@ class EPNet(object):
         :return: the success state
         :rtype: bool
         """
-        k = int(self.population_size / 2)
-        improve = [p-f for (f,p),_ in self.population.top_k(k)]
+        improve = [p-f for (f,p),_ in self.population]
         return np.mean(improve) < 1.0
 
 
@@ -586,7 +589,7 @@ class EPNet(object):
         offspring_population = PriorityQueue(max_size=self.population_size)
         for (fitness, previous), individual in self.population:
             offspring = individual.copy()
-            if previous >= fitness + self.EVOLVE_THRESHOLD:
+            if previous > fitness + self.EVOLVE_THRESHOLD:
                 offspring.train(X, y, lr, epoch=self.__evolve_epoch)
             else:
                 offspring.simul_anneal(X, y, temperature, steps=self.__anneal_epoch)
@@ -606,31 +609,26 @@ class EPNet(object):
             new_temperature = temperature / (previous-fitness)
             offspring.simul_anneal(X, y, new_temperature, steps=self.__anneal_epoch)
             offspring_fitness = self._fitness(offspring, X, y)
-            offspring_priority = self.Priority(offspring_fitness, offspring_fitness+self.INIT_THRESHOLD)
+            offspring_priority = self.Priority(offspring_fitness, offspring_fitness+self.EVOLVE_THRESHOLD+0.1)
             offspring_population.put(offspring, priority=offspring_priority)
         self.population = offspring_population
 
 
 
     def run(self, X, y, num_hid, lr, temperature):
-
         self._generate_population(X, y, num_hid)
-
         self._initial_training(X, y, lr)
-
-        for _ in itertools.count():
+        for i in itertools.count(start=2):
             self._evolve_generation(X, y, lr, temperature)
-
-            (fitness, _), top = self.population.top()
-            res = top.evaluate(X) > 0.5
-            for i, (ya, yhat) in enumerate(zip(y, res)):
-                if ya != yhat:
-                    print(i, ya, yhat)
-            print(fitness, '\n')
-
             if self._no_improve():
-                print('stucked')
-                self._heaten_population(X, y, temperature)
+                # self._heaten_population(X, y, temperature)
+                self.population = PriorityQueue(self.population_size)
+                self._generate_population(X, y, num_hid)
+                self._initial_training(X, y, lr)
+            (_, _), top = self.population.top()
+            res = top.evaluate(X) > 0.5
+            if (res^y).sum() == 0:
+                return top, i
 
 
 
@@ -638,12 +636,15 @@ def main():
     parser = argparse.ArgumentParser(description='An N-parity problem solver based on evolutionary ANN')
     parser.add_argument('-s', type=int, required=True, help='An integer random seed', metavar='SEED', dest='seed')
     parser.add_argument('-n', default=5, type=int, help='The parameter N of N-parity problem', metavar='N', dest='n')
-    parser.add_argument('-d', default=0.75, type=float, help='The initial connection density of forward ANN', metavar='DENSE', dest='dense')
-    parser.add_argument('-r', default=10.0, type=float, help='The range of initial weights, from -R to R', metavar='R', dest='range')
     args = parser.parse_args()
 
     np.random.seed(args.seed)
-    n = args.n
+    epnet = EPNet(10, args.n, args.n, 1)
+    genp5 = ParityNGenerator(args.n)
+    _, res, vec = map(np.array, zip(*genp5.all()))
+    top, i = epnet.run(vec, res, num_hid=2, lr=0.5, temperature=1.0)
+    print(top)
+    print(i)
 
 
 if __name__ == '__main__':

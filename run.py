@@ -35,10 +35,12 @@ def ann_run():
 
 @annotated_timer('test epnet')
 def epnet_run():
-    epnet = EPNet(20, 5, 5, 1)
+    epnet = EPNet(10, 5, 5, 1)
     genp5 = ParityNGenerator(5)
     _, res, vec = map(np.array, zip(*genp5.all()))
-    epnet.run(vec, res, num_hid=2, lr=0.5, temperature=1.0)
+    top, i = epnet.run(vec, res, num_hid=2, lr=0.5, temperature=1.0)
+    print(top)
+    print(i)
 
 
 
