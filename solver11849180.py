@@ -140,6 +140,41 @@ class ForwardArtificialNeuralNectwork(object):
         return reprio.getvalue()
 
 
+    def __cmp__(self, other):
+        """ Compare two ANN
+
+        :param other: another Forward ANN
+        :type other: ForwardArtificialNeuralNectwork
+        :return: cmp result
+        :rtype: int
+        """
+        if not isinstance(other, ForwardArtificialNeuralNectwork):
+            raise self.ANNException('cannot compare to non-ANN')
+        this = self.weight.sum()
+        that = other.weight.sum()
+        if this < that:
+            return -1
+        elif this > that:
+            return 1
+        else:
+            return id(self) - id(other)
+
+
+    def __lt__(self, other):
+        """ Less than operator overload
+
+        :param other: another Forward ANN
+        :type other: ForwardArtificialNeuralNectwork
+        :return: cmp result
+        :rtype: int
+        """
+        if not isinstance(other, ForwardArtificialNeuralNectwork):
+            raise self.ANNException('cannot compare to non-ANN')
+        this = self.weight.sum()
+        that = other.weight.sum()
+        return this < that or id(self) < id(other)
+
+
     def initialize(self, num_hid, dense, mean, stddev, seed=None):
         """ Initialize the ANN according to the rule specified in the paper.
 
@@ -176,7 +211,6 @@ class ForwardArtificialNeuralNectwork(object):
                 if has_con and np.random.rand()>dense:
                     row[j] = False
 
-        # self.weight[:,:] = np.random.uniform(-w_range, w_range, self.weight.shape)
         self.weight[:,:] = np.random.normal(mean, stddev, self.weight.shape)
         self.weight *= self.connectivity
 
@@ -342,15 +376,15 @@ class ForwardArtificialNeuralNectwork(object):
         'linear': lambda t, k: max(t - 0.005, 0.001),  # TODO: new cooldown
         'exponential': lambda t, k: 0.99 * t,
     }
-    def simul_anneal(self, X, y, max_steps, temperature=1.0, cooldown='exponential', mean=0.0, stddev=1.0):
+    def simul_anneal(self, X, y, temperature, steps, cooldown='exponential', mean=0.0, stddev=1.0, quit=1e-6):
         """ Simulated annealing algorithm to optimize the ANN
 
         :param X: the input matrix
         :type X: np.ndarray
         :param y: the ground-truth prediction
         :type y: np.ndarray
-        :param max_steps: max iteration of annealing
-        :type max_steps: int
+        :param steps: max iteration of annealing
+        :type steps: int
         :param temperature: the initial temperature
         :type temperature: float
         :param cooldown: the cooldown method of temperature
@@ -361,12 +395,14 @@ class ForwardArtificialNeuralNectwork(object):
         :type stddev: float
         """
         cooldown = self.cooldown_method[cooldown]
-        for i in range(max_steps):
+        for i in range(steps):
             temperature = cooldown(temperature, i)
             before_energy = self._energy(X, y)
             move = self._to_neighbor(mean, stddev)
             after_energy = self._energy(X, y)
             dE = after_energy - before_energy
+            if 0 < dE < quit:
+                return
             if dE < 0.0 or np.exp(-dE/temperature) > np.random.rand():
                 # accept the new state
                 pass
@@ -456,14 +492,41 @@ class PriorityQueue(queue.PriorityQueue):
             heapq.heapify(self.queue)
 
 
+    def top_k(self, k):
+        """ Return the top k element
+
+        :param k: first k
+        :type k: int
+        :return: top k elements
+        :rtype: list
+        """
+        with self.mutating:
+            topk = heapq.nsmallest(k, self.queue)
+        return topk
+
+
+    def top(self):
+        """ Return the top element (but not removed)
+
+        :return: the top element
+        :rtype: element
+        """
+        return self.top_k(1)[0]
+
+
 
 class EPNet(object):
     """ EPNet, referenced from paper Section III
     """
 
-    Priority = collections.namedtuple('Priority', ['fitness', 'sucess'])
+    Priority = collections.namedtuple('Priority', ['fitness', 'previous'])
 
-    def __init__(self, population_size, dim_in, dim_hid, dim_out, dense=1.0, mean=0.0, stddev=1.0, init_epoch=500):
+    # TODO: make the thresholds tuneable
+    INIT_THRESHOLD = 2.0
+    EVOLVE_THRESHOLD = 0.5
+
+    def __init__(self, population_size, dim_in, dim_hid, dim_out, dense=1.0, mean=0.0, stddev=1.0,
+                 init_epoch=500, evolve_epoch=500, anneal_epoch=500):
         self.population_size = population_size
         self.population = PriorityQueue(max_size=population_size)
         self.__generate = functools.partial(ForwardArtificialNeuralNectwork,
@@ -472,6 +535,8 @@ class EPNet(object):
         self.__mean = mean
         self.__stddev = stddev
         self.__init_epoch = init_epoch
+        self.__evolve_epoch = evolve_epoch
+        self.__anneal_epoch = anneal_epoch
 
 
     @staticmethod
@@ -483,7 +548,19 @@ class EPNet(object):
         :return: the fitness value
         :rtype: float
         """
-        return individual._energy(X, y)
+        yhat = individual.evaluate(X)
+        return ((y - yhat) ** 2).sum()
+
+
+    def _no_improve(self):
+        """ the current population is all failed to improve
+
+        :return: the success state
+        :rtype: bool
+        """
+        k = int(self.population_size / 2)
+        improve = [p-f for (f,p),_ in self.population.top_k(k)]
+        return np.mean(improve) < 1.0
 
 
     def _generate_population(self, X, y, num_hid):
@@ -491,53 +568,69 @@ class EPNet(object):
             individual = self.__generate()
             individual.initialize(num_hid, dense=self.__dense, mean=self.__mean, stddev=self.__stddev)
             fitness = self._fitness(individual, X, y)
-            priority = self.Priority(fitness, False)
+            priority = self.Priority(fitness, 1e10)
             self.population.put(individual, priority=priority)
 
 
     def _initial_training(self, X, y, lr):
-
-        # TODO: make the threshold tuneable
-        THRESHOLD = 1.0
-
         new_population = PriorityQueue(max_size=self.population_size)
-        for (fitness, sucess), individual in self.population:
+        for (fitness, previous), individual in self.population:
             individual.train(X, y, lr, epoch=self.__init_epoch)
             new_fitness = self._fitness(individual, X, y)
-            if new_fitness <= fitness - THRESHOLD:
-                sucess = True
-            priority = self.Priority(new_fitness, sucess)
+            priority = self.Priority(new_fitness, fitness)
             new_population.put(individual, priority=priority)
-        self.population.merge(new_population)
+        self.population = new_population
+
+
+    def _evolve_generation(self, X, y, lr, temperature):
+        offspring_population = PriorityQueue(max_size=self.population_size)
+        for (fitness, previous), individual in self.population:
+            offspring = individual.copy()
+            if previous >= fitness + self.EVOLVE_THRESHOLD:
+                offspring.train(X, y, lr, epoch=self.__evolve_epoch)
+            else:
+                offspring.simul_anneal(X, y, temperature, steps=self.__anneal_epoch)
+            offspring_fitness = self._fitness(offspring, X, y)
+            offspring_priority = self.Priority(offspring_fitness, fitness)
+            offspring_population.put(offspring, priority=offspring_priority)
+            parent_priority = self.Priority(fitness, previous)
+            offspring_population.put(individual, priority=parent_priority)
+        self.population = offspring_population
         self.population.constraint()
 
 
-    def run(self, X, y, num_hid, lr):
+    def _heaten_population(self, X, y, temperature):
+        offspring_population = PriorityQueue(max_size=self.population_size)
+        for (fitness, previous), individual in self.population:
+            offspring = individual.copy()
+            new_temperature = temperature / (previous-fitness)
+            offspring.simul_anneal(X, y, new_temperature, steps=self.__anneal_epoch)
+            offspring_fitness = self._fitness(offspring, X, y)
+            offspring_priority = self.Priority(offspring_fitness, offspring_fitness+self.INIT_THRESHOLD)
+            offspring_population.put(offspring, priority=offspring_priority)
+        self.population = offspring_population
+
+
+
+    def run(self, X, y, num_hid, lr, temperature):
 
         self._generate_population(X, y, num_hid)
 
         self._initial_training(X, y, lr)
 
+        for _ in itertools.count():
+            self._evolve_generation(X, y, lr, temperature)
 
-        print(self.population.qsize())
+            (fitness, _), top = self.population.top()
+            res = top.evaluate(X) > 0.5
+            for i, (ya, yhat) in enumerate(zip(y, res)):
+                if ya != yhat:
+                    print(i, ya, yhat)
+            print(fitness, '\n')
 
-
-        # for i in itertools.count():
-        #     pass
-
-
-
-    def test(self):
-        genp5 = ParityNGenerator(5)
-        _, res, vec = map(np.array, zip(*genp5.all()))
-        self.run(vec, res, num_hid=2, lr=0.3)
-
-
-
-
-class NParityProblem(object):
-    def __init__(self):
-        pass
+            if self._no_improve():
+                print('stucked')
+                self._heaten_population(X, y, temperature)
 
 
 

@@ -25,7 +25,7 @@ def ann_run():
 
     print()
 
-    ann.simul_anneal(vec, res, max_steps=1000)
+    ann.simul_anneal(vec, res, temperature=1.0, steps=1000)
 
     result = (ann.evaluate(vec) > 0.5)
     for y, yhat in zip(res, result):
@@ -36,7 +36,9 @@ def ann_run():
 @annotated_timer('test epnet')
 def epnet_run():
     epnet = EPNet(20, 5, 5, 1)
-    epnet.test()
+    genp5 = ParityNGenerator(5)
+    _, res, vec = map(np.array, zip(*genp5.all()))
+    epnet.run(vec, res, num_hid=2, lr=0.5, temperature=1.0)
 
 
 
