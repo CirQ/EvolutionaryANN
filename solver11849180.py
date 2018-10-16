@@ -268,7 +268,7 @@ class ForwardArtificialNeuralNectwork(object):
         return nodes
 
 
-    def _backpropagate(self, expected, nodes, lr):
+    def _backpropagate(self, expected, nodes, lr, ret=False):
         """ Back-propagating algorithm, for updating weights
 
         :param expected: the expected output vector
@@ -286,10 +286,13 @@ class ForwardArtificialNeuralNectwork(object):
             if i+1 < self.dim_node: # last node has no backpropagation
                 gamma[:,i] += delta[:,i+1:].dot(self.weight[i+1:,i])
             delta[:,i] = self.__sigmoid(nodes[:,i], True) * gamma[:,i]
-        self.weight -= lr * np.matmul(delta.transpose(), nodes) # update weights
+        if ret:
+            return np.matmul(delta.transpose(), nodes)
+        else:
+            self.weight -= lr * np.matmul(delta.transpose(), nodes) # update weights
 
 
-    def train(self, X, y, lr, epoch):
+    def train(self, X, y, lr, epoch, method='adam'):
         """ Train the network with back propagation (fixed learning rate)
 
         :param X: the input matrix (or vector)
@@ -300,6 +303,8 @@ class ForwardArtificialNeuralNectwork(object):
         :type lr: float
         :param epoch: the epochs of training
         :type epoch: int
+        :param method: the optimizer ('gd' or 'adam')
+        :type method: str
         """
         if len(y.shape) == 1:
             y = y.reshape((-1, 1))
@@ -307,9 +312,27 @@ class ForwardArtificialNeuralNectwork(object):
             raise self.ANNException('learning rate cannot be negative or exceeds 1')
         if epoch <= 0:
             raise self.ANNException('epoch must be postitive integer')
-        for _ in range(epoch):
-            nodes = self._forward(X)
-            self._backpropagate(y, nodes, lr)
+        if method == 'gd':
+            for _ in range(epoch):
+                nodes = self._forward(X)
+                self._backpropagate(y, nodes, lr)
+        elif method == 'adam':
+            alpha = 0.1
+            beta1 = 0.5
+            beta2 = 0.999
+            epsilon = 1e-8
+            mt = np.zeros(shape=self.weight.shape)
+            vt = np.zeros(shape=self.weight.shape)
+            for t in range(1, epoch+1):
+                nodes = self._forward(X)
+                gt = self._backpropagate(y, nodes, alpha, ret=True)
+                mt = beta1*mt + (1-beta1)*gt
+                vt = beta2*vt + (1-beta2)*gt**2
+                mthat = mt / (1-np.power(beta1, t))
+                vthat = vt / (1-np.power(beta2, t))
+                self.weight -= alpha * mthat/(np.sqrt(vthat)+epsilon)
+        else:
+            raise self.ANNException('only gd and adam optimizer are supported')
 
 
     def evaluate(self, x):
