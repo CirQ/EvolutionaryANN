@@ -9,11 +9,13 @@ import functools
 import heapq
 import io
 import itertools
+import math
 import queue
 import threading
 
 import numpy as np
 
+global_epoch = 0
 
 
 class ParityNGenerator(object):
@@ -114,11 +116,13 @@ class ForwardArtificialNeuralNectwork(object):
         for i in range(self.dim_in, self.dim_node):
             if i<self.dim_in+self.dim_hid and not self.hidden[i-self.dim_in]:   # no such hidden node
                 continue
-            strio.write('{:6.1f}'.format(weight[i][0]))
+            # strio.write('{:6.1f}'.format(weight[i][0]))
+            strio.write('{:.6f}'.format(weight[i][0]))
             for j in range(1, self.dim_node-1):
                 if self.dim_in<=j<self.dim_in+self.dim_hid and not self.hidden[j-self.dim_in]:  # this node is not connected
                     continue
-                strio.write(' {:6.1f}'.format(weight[i][j]))
+                # strio.write(' {:6.1f}'.format(weight[i][j]))
+                strio.write(' {:.6f}'.format(weight[i][j]))
             if i < self.dim_node - 1:
                 strio.write('\n')
         return strio.getvalue()
@@ -257,6 +261,8 @@ class ForwardArtificialNeuralNectwork(object):
         :return: the nodes output
         :rtype: np.ndarray
         """
+        global global_epoch
+        global_epoch += 1
         bias = -np.ones((x.shape[0], 1))
         tail = np.zeros((x.shape[0], self.dim_hid+self.dim_out))
         nodes = np.concatenate((bias, x, tail), axis=1)
@@ -292,7 +298,7 @@ class ForwardArtificialNeuralNectwork(object):
             self.weight -= lr * np.matmul(delta.transpose(), nodes) # update weights
 
 
-    def train(self, X, y, lr, epoch, method='adam'):
+    def train(self, X, y, lr, epoch, method='adam', quit=1e-4):
         """ Train the network with back propagation (fixed learning rate)
 
         :param X: the input matrix (or vector)
@@ -305,6 +311,8 @@ class ForwardArtificialNeuralNectwork(object):
         :type epoch: int
         :param method: the optimizer ('gd' or 'adam')
         :type method: str
+        :param quit: error decrease threshold to quit optimization
+        :type quit: float
         """
         if len(y.shape) == 1:
             y = y.reshape((-1, 1))
@@ -323,6 +331,7 @@ class ForwardArtificialNeuralNectwork(object):
             epsilon = 1e-8
             mt = np.zeros(shape=self.weight.shape)
             vt = np.zeros(shape=self.weight.shape)
+            before_err = self._energy(X, y)
             for t in range(1, epoch+1):
                 nodes = self._forward(X)
                 gt = self._backpropagate(y, nodes, alpha, ret=True)
@@ -331,6 +340,11 @@ class ForwardArtificialNeuralNectwork(object):
                 mthat = mt / (1-np.power(beta1, t))
                 vthat = vt / (1-np.power(beta2, t))
                 self.weight -= alpha * mthat/(np.sqrt(vthat)+epsilon)
+                after_err = self._energy(X, y)
+                if 0 < after_err-before_err < quit:
+                    return
+                else:
+                    before_err = after_err
         else:
             raise self.ANNException('only gd and adam optimizer are supported')
 
@@ -397,7 +411,7 @@ class ForwardArtificialNeuralNectwork(object):
 
     cooldown_method = {
         'linear': lambda t, k: max(t - 0.005, 0.001),  # TODO: new cooldown
-        'exponential': lambda t, k: 0.99 * t,
+        'exponential': lambda t, k: (1/math.e) * t,
     }
     def simul_anneal(self, X, y, temperature, steps, cooldown='exponential', mean=0.0, stddev=1.0, quit=1e-4):
         """ Simulated annealing algorithm to optimize the ANN
@@ -654,7 +668,9 @@ class EPNet(object):
                 return top, i
 
 
+# from util import annotated_timer
 
+# @annotated_timer('main')
 def main():
     parser = argparse.ArgumentParser(description='An N-parity problem solver based on evolutionary ANN')
     parser.add_argument('-s', type=int, required=True, help='An integer random seed', metavar='SEED', dest='seed')
@@ -667,7 +683,10 @@ def main():
     _, res, vec = map(np.array, zip(*genp5.all()))
     top, i = epnet.run(vec, res, num_hid=2, lr=0.5, temperature=1.0)
     print(top)
-    print(i)
+    print(global_epoch)
+    # yhat = top.evaluate(vec)
+    # loss = ((res - yhat) ** 2).sum() / 2
+    # print(loss)
 
 
 if __name__ == '__main__':
